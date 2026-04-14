@@ -4,16 +4,13 @@ import re
 import requests
 from dotenv import load_dotenv
 from groq import Groq
-from langchain_ollama import OllamaEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
 load_dotenv()
 
-OLLAMA_BASE_URL = "http://localhost:11434"
 MODEL_NAME = "qwen3.5:27b"
-EMBED_MODEL = "mxbai-embed-large"
-CHROMA_PATH = "../chroma_db"
 
 RAG_PROMPT_TEMPLATE = """You are a helpful Swedish tax assistant.
 Answer the question based on the context below.
@@ -37,16 +34,28 @@ Question: {question}
 Answer:"""
 
 
+def get_embeddings():
+    if os.getenv("USE_CLOUD_EMBEDDINGS") == "true":
+        return HuggingFaceEmbeddings(
+            model_name="mixedbread-ai/mxbai-embed-large-v1"
+        )
+    else:
+        from langchain_ollama import OllamaEmbeddings
+        return OllamaEmbeddings(
+            model="mxbai-embed-large",
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        )
+
+
 def get_vectorstore() -> QdrantVectorStore:
     client = QdrantClient(
         url=os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
     return QdrantVectorStore(
         client=client,
         collection_name="swedish_tax",
-        embedding=embeddings,
+        embedding=get_embeddings(),
     )
 
 
@@ -70,7 +79,7 @@ def call_qwen(prompt: str) -> str:
     response = requests.post(
         "http://localhost:11434/api/generate",
         json={
-            "model": "qwen3.5:27b",
+            "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -102,7 +111,7 @@ def call_groq(prompt: str) -> str:
 def call_llm(prompt: str) -> str:
     if os.getenv("USE_GROQ") == "true":
         return call_groq(prompt)
-    return call_llm(prompt)
+    return call_qwen(prompt)
 
 
 def has_good_chunks(docs) -> bool:

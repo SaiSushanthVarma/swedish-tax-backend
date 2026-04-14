@@ -12,9 +12,6 @@ from qdrant_client import QdrantClient
 
 from rag import ask_question
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-CHROMA_PATH = "../chroma_db"
-EMBED_MODEL = "mxbai-embed-large"
 MODEL_NAME = "qwen3.5:27b"
 
 
