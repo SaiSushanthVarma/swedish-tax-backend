@@ -3,8 +3,16 @@ uvicorn
 langchain
 langchain-community
 langchain-ollama
+langchain-chroma
+langchain-qdrant
+langchain-huggingface
 chromadb
 pypdf
 python-multipart
 python-dotenv
 requests
+beautifulsoup4
+qdrant-client
+groq
+sentence-transformers
+langchain-text-splitters

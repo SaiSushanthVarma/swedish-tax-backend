@@ -1,11 +1,14 @@
+import os
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
+from qdrant_client import QdrantClient
 
 from rag import ask_question
 
@@ -50,14 +53,20 @@ def chat(request: ChatRequest):
 
 @app.get("/admin/stats")
 def stats():
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
-    vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-    collection = vectorstore._collection
-    data = collection.get(include=["metadatas"])
-    total_chunks = len(data["ids"])
+    client = QdrantClient(
+        url=os.getenv("QDRANT_URL"),
+        api_key=os.getenv("QDRANT_API_KEY"),
+    )
+    result = client.scroll(
+        collection_name="swedish_tax",
+        limit=10000,
+        with_payload=True,
+        with_vectors=False,
+    )
+    points = result[0]
+    total_chunks = len(points)
     filenames = sorted({
-        m.get("filename") or m.get("source", "unknown")
-        for m in data["metadatas"]
-        if m
+        (p.payload or {}).get("filename") or (p.payload or {}).get("source", "unknown")
+        for p in points
     })
     return {"total_chunks": total_chunks, "filenames": filenames}
