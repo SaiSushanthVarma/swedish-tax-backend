@@ -4,13 +4,16 @@ import re
 import requests
 from dotenv import load_dotenv
 from groq import Groq
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
 load_dotenv()
 
 MODEL_NAME = "qwen3.5:27b"
+
+HF_EMBED_URL = (
+    "https://router.huggingface.co/hf-inference/models/"
+    "mixedbread-ai/mxbai-embed-large-v1/pipeline/feature-extraction"
+)
 
 RAG_PROMPT_TEMPLATE = """You are a helpful Swedish tax assistant.
 Answer the question based on the context below.
@@ -34,46 +37,67 @@ Question: {question}
 Answer:"""
 
 
-def get_embeddings():
-    if os.getenv("USE_CLOUD_EMBEDDINGS") == "true":
-        return HuggingFaceEmbeddings(
-            model_name="mixedbread-ai/mxbai-embed-large-v1"
-        )
-    else:
-        from langchain_ollama import OllamaEmbeddings
-        return OllamaEmbeddings(
-            model="mxbai-embed-large",
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-        )
+# ── Embeddings ────────────────────────────────────────────────────────────────
+
+def get_embeddings_hf(texts: list) -> list:
+    headers = {"Authorization": f"Bearer {os.getenv('HF_API_KEY')}"}
+    response = requests.post(HF_EMBED_URL, headers=headers, json={"inputs": texts})
+    response.raise_for_status()
+    return response.json()
 
 
-def get_vectorstore() -> QdrantVectorStore:
+def get_single_embedding(text: str) -> list:
+    return get_embeddings_hf([text])[0]
+
+
+# ── Retrieval ─────────────────────────────────────────────────────────────────
+
+def search_qdrant(question: str, limit: int = 5) -> list[dict]:
+    """Return a list of payload dicts from the top matching Qdrant points."""
     client = QdrantClient(
         url=os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    return QdrantVectorStore(
-        client=client,
+    results = client.search(
         collection_name="swedish_tax",
-        embedding=get_embeddings(),
+        query_vector=get_single_embedding(question),
+        limit=limit,
     )
+    return [r.payload for r in results]
 
 
-def clean_docs(docs):
+def clean_payloads(payloads: list[dict]) -> list[dict]:
+    """Filter out short / formula-heavy chunks."""
     cleaned = []
-    for doc in docs:
-        text = doc.page_content.strip()
+    for p in payloads:
+        # Migration stored text under "document"; ingest may use "page_content"
+        text = (p.get("document") or p.get("page_content") or "").strip()
         if len(text) < 150:
+            continue
+        if not text:
             continue
         letter_ratio = sum(c.isalpha() for c in text) / len(text)
         if letter_ratio < 0.50:
             continue
-        words = text.split()
-        if len(words) < 10:
+        if len(text.split()) < 10:
             continue
-        cleaned.append(doc)
+        cleaned.append(p)
     return cleaned
 
+
+def has_good_chunks(payloads: list[dict]) -> bool:
+    """True if at least 3 payloads pass the letter_ratio quality bar."""
+    if len(payloads) < 3:
+        return False
+    good = sum(
+        1 for p in payloads
+        if (text := (p.get("document") or p.get("page_content") or ""))
+        and sum(c.isalpha() for c in text) / len(text) > 0.5
+    )
+    return good >= 3
+
+
+# ── LLM ──────────────────────────────────────────────────────────────────────
 
 def call_qwen(prompt: str) -> str:
     response = requests.post(
@@ -82,11 +106,7 @@ def call_qwen(prompt: str) -> str:
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": 0.1,
-                "num_predict": 1024,
-                "num_ctx": 4096,
-            },
+            "options": {"temperature": 0.1, "num_predict": 1024, "num_ctx": 4096},
             "think": False,
         },
         timeout=300,
@@ -114,32 +134,16 @@ def call_llm(prompt: str) -> str:
     return call_qwen(prompt)
 
 
-def has_good_chunks(docs) -> bool:
-    """True if at least 3 docs pass the letter_ratio quality bar."""
-    if len(docs) < 3:
-        return False
-    good = sum(
-        1 for doc in docs
-        if sum(c.isalpha() for c in doc.page_content) / len(doc.page_content) > 0.5
-    )
-    return good >= 3
-
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 def ask_question(question: str) -> dict:
-    vectorstore = get_vectorstore()
-    retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={
-            "k": 5,
-            "fetch_k": 20,
-            "lambda_mult": 0.7,
-        },
-    )
-    docs = clean_docs(retriever.invoke(question))
+    payloads = clean_payloads(search_qdrant(question, limit=5))
 
-    if has_good_chunks(docs):
-        print(f"RAG path — {len(docs)} good chunks found")
-        context = "\n\n".join(doc.page_content for doc in docs)
+    if has_good_chunks(payloads):
+        print(f"RAG path — {len(payloads)} good chunks found")
+        context = "\n\n".join(
+            p.get("document") or p.get("page_content") or "" for p in payloads
+        )
         prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=question)
         print("Context length:", len(context))
         print("Prompt being sent:", prompt[:500])
@@ -151,18 +155,18 @@ def ask_question(question: str) -> dict:
             answer = "Kunde inte generera svar. Försök igen."
 
         sources = []
-        for doc in docs:
-            meta = doc.metadata
+        for p in payloads:
+            text = p.get("document") or p.get("page_content") or ""
             sources.append({
-                "page": meta.get("page", 0),
-                "snippet": doc.page_content[:200],
-                "filename": meta.get("source", ""),
+                "page": p.get("page", 0),
+                "snippet": text[:200],
+                "filename": p.get("source") or p.get("filename") or "",
             })
 
         return {"answer": answer, "sources": sources}
 
     else:
-        print(f"Fallback path — only {len(docs)} usable chunks, answering from model knowledge")
+        print(f"Fallback path — only {len(payloads)} usable chunks, answering from model knowledge")
         prompt = FALLBACK_PROMPT_TEMPLATE.format(question=question)
 
         answer = call_llm(prompt)
