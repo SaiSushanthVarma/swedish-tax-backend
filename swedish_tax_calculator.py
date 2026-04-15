@@ -86,28 +86,21 @@ PRISBASBELOPP_2026 = 59200
 
 
 def calculate_grundavdrag(income: float) -> float:
-    """
-    Grundavdrag 2026 based on prisbasbelopp 59,200 kr.
-    Source: Skatteverket SKV 425 utgåva 32
-    """
     pbb = 59200  # prisbasbelopp 2026
-
     if income <= 0:
         return 0
-    elif income <= 0.99 * pbb:       # <= 58,608
+    elif income <= 0.99 * pbb:
         return 0.423 * income
-    elif income <= 2.72 * pbb:       # <= 161,024
+    elif income <= 2.72 * pbb:
         return 0.423 * 0.99 * pbb + 0.20 * (income - 0.99 * pbb)
-    elif income <= 3.11 * pbb:       # <= 184,112
+    elif income <= 3.11 * pbb:
         return min(0.36 * pbb, 0.423 * 0.99 * pbb + 0.20 * (income - 0.99 * pbb))
-    elif income <= 7.88 * pbb:       # <= 466,496
-        return 0.36 * pbb            # = 21,312
-    elif income <= 10.0 * pbb:       # <= 592,000
+    elif income <= 7.88 * pbb:
+        return 0.36 * pbb
+    elif income <= 10.0 * pbb:
         return 0.36 * pbb + 0.20 * (income - 7.88 * pbb)
-    elif income <= 12.75 * pbb:      # <= 754,800
+    elif income <= 12.75 * pbb:
         return min(0.77 * pbb, 0.36 * pbb + 0.20 * (income - 7.88 * pbb))
-    elif income <= 13.5 * pbb:       # <= 799,200
-        return 0.77 * pbb - 0.20 * (income - 12.75 * pbb)
     else:
         return max(0.17 * pbb, 0.77 * pbb - 0.20 * (income - 12.75 * pbb))
 
@@ -193,28 +186,29 @@ def detect_calculation_request(question: str) -> dict:
 
     question_lower = question.lower()
 
-    # Monthly salary detection — checked first so "45000 kr/month" isn't
-    # misread as a yearly figure by the generic yearly patterns below.
     monthly_patterns = [
-        r'(\d[\d\s,]+)\s*(?:kr|sek)?\s*(?:per|a|/)\s*(?:month|månad|mån)\b',
+        r'(\d[\d\s,]+)\s*(?:kr|sek)?\s*(?:per|a|/)\s*(?:month|månad|mån)',
         r'(?:monthly|månads(?:lön)?)[:\s]+(\d[\d\s,]+)',
-        r'(\d[\d\s,]+)\s*(?:kr|sek)\s*(?:i månaden|per månaden|månadsvis)',
-        r'(\d{4,6})\s*(?:kr)?\s*monthly',
+        r'(\d[\d\s,]+)\s*kr\s*(?:i månaden|per månaden)',
+        r'(\d{4,6})\s*(?:kr\s*)?monthly',
+        r'(\d{4,6})\s*(?:kr\s*)?(?:per|a)\s*month',
     ]
 
-    salary = None
+    monthly_salary = None
     for pattern in monthly_patterns:
         match = re.search(pattern, question_lower, re.IGNORECASE)
         if match:
             raw = match.group(1).replace(' ', '').replace(',', '')
             try:
                 val = float(raw)
-                if 5000 <= val <= 200000:  # reasonable monthly range in kr
-                    salary = val * 12      # convert to yearly
-                    print(f"Monthly salary detected: {val} kr/month = {salary} kr/year")
+                if 5000 <= val <= 200000:
+                    monthly_salary = val * 12
+                    print(f"Monthly salary detected: {val}/month = {monthly_salary}/year")
                     break
             except Exception:
                 pass
+
+    salary = monthly_salary
 
     # Yearly salary detection — only runs if monthly detection found nothing
     if salary is None:
