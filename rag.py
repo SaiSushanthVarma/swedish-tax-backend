@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from groq import Groq
 from qdrant_client import QdrantClient
 
+from swedish_tax_facts_2026 import QUICK_ANSWERS
+
 load_dotenv()
 
 MODEL_NAME = "qwen3.5:27b"
@@ -15,18 +17,26 @@ HF_EMBED_URL = (
     "mixedbread-ai/mxbai-embed-large-v1/pipeline/feature-extraction"
 )
 
-RAG_PROMPT_TEMPLATE = """You are a helpful Swedish tax assistant.
-Answer the question based on the context below.
-Be helpful and informative. Answer in the same language as the question.
-Use the provided document excerpts as your primary source.
-Also use your general knowledge about Swedish tax to supplement the answer if needed.
+PROMPT_TEMPLATE = """You are a precise Swedish tax assistant.
 
-Context:
+STRICT RULES — follow these exactly:
+1. ONLY use information from the context provided below
+2. If context does not contain the answer, say:
+   "Jag hittar inte den informationen i dokumenten.
+    Kontakta Skatteverket på skatteverket.se för korrekt svar."
+3. NEVER invent tax rates, percentages or kronor amounts
+4. NEVER use tax rules from other years than 2026
+5. If asked about a specific municipality rate, say you don't know
+   unless the context mentions it (the calculator handles rates)
+6. Answer in the SAME language as the question
+7. Keep answers concise and factual
+
+Context from official Skatteverket documents:
 {context}
 
 Question: {question}
 
-Answer:"""
+Answer (be precise, cite document when possible):"""
 
 FALLBACK_PROMPT_TEMPLATE = """You are a helpful Swedish tax assistant.
 Answer this question about Swedish tax from your knowledge.
@@ -70,22 +80,31 @@ def search_qdrant(question: str, limit: int = 5) -> list[dict]:
     return [r.payload for r in results]
 
 
-def clean_payloads(payloads: list[dict]) -> list[dict]:
-    """Filter out short / formula-heavy chunks."""
+def clean_payloads(results: list) -> list:
     cleaned = []
-    for p in payloads:
-        # Migration stored text under "document"; ingest may use "page_content"
-        text = (p.get("document") or p.get("page_content") or "").strip()
-        if len(text) < 150:
+    for r in results:
+        text = r.get("page_content", "") or r.get("text", "")
+
+        # Must be long enough
+        if len(text.strip()) < 150:
             continue
-        if not text:
+
+        # Must be mostly letters (no formula pages)
+        letters = sum(c.isalpha() for c in text)
+        if letters / len(text) < 0.50:
             continue
-        letter_ratio = sum(c.isalpha() for c in text) / len(text)
-        if letter_ratio < 0.50:
+
+        # Must have complete sentences (has periods)
+        if text.count('.') < 2:
             continue
-        if len(text.split()) < 10:
+
+        # Must not be mostly numbers (tax tables)
+        digits = sum(c.isdigit() for c in text)
+        if digits / len(text) > 0.30:
             continue
-        cleaned.append(p)
+
+        cleaned.append(r)
+
     return cleaned
 
 
@@ -101,7 +120,88 @@ def has_good_chunks(payloads: list[dict]) -> bool:
     return good >= 3
 
 
+def calculate_confidence(docs: list) -> str:
+    """Rate how confident we are in the answer."""
+
+    if not docs:
+        return "low"
+
+    # Count how many chunks have good letter ratio
+    good_chunks = sum(
+        1 for d in docs
+        if sum(c.isalpha() for c in d.get("text", "")) /
+           max(len(d.get("text", "")), 1) > 0.5
+    )
+
+    if good_chunks >= 3:
+        return "high"
+    elif good_chunks >= 1:
+        return "medium"
+    else:
+        return "low"
+
+
+# ── Disclaimer ───────────────────────────────────────────────────────────────
+
+def add_disclaimer(answer: str, question: str) -> str:
+    tax_keywords = [
+        "procent", "percent", "%", "kr", "sek",
+        "avdrag", "skatt", "tax", "deduction",
+    ]
+
+    has_numbers = any(k in answer.lower() for k in tax_keywords)
+
+    if has_numbers:
+        disclaimer = "\n\n---\n⚠️ *Always verify with Skatteverket.se or a licensed tax advisor for your specific situation.*"
+        return answer + disclaimer
+
+    return answer
+
+
+# ── Hallucination check ───────────────────────────────────────────────────────
+
+def check_for_hallucination(answer: str) -> tuple[str, bool]:
+    """Detect common hallucination patterns and flag them."""
+
+    hallucination_flags = [
+        # Wrong state tax rates (Sweden only has 20%)
+        r"21\.3%", r"22\.6%", r"25%.*state tax",
+        # Wrong thresholds (common hallucination)
+        r"548[\s,]780", r"SEK 614,000.*state",
+        # Invented rules
+        r"as of 2023.*tax rate",
+        r"2024.*21\.3",
+    ]
+
+    flagged = False
+    for pattern in hallucination_flags:
+        if re.search(pattern, answer, re.IGNORECASE):
+            flagged = True
+            break
+
+    if flagged:
+        warning = "⚠️ Note: Some figures in this answer may be outdated. "
+        warning += "Please verify current rates at skatteverket.se\n\n"
+        return warning + answer, True
+
+    return answer, False
+
+
+# ── Quick answers ─────────────────────────────────────────────────────────────
+
+def check_quick_answer(question: str) -> str | None:
+    q_lower = question.lower()
+    for keyword, answer in QUICK_ANSWERS.items():
+        if keyword in q_lower:
+            return answer
+    return None
+
+
 # ── LLM ──────────────────────────────────────────────────────────────────────
+
+def strip_think_tags(text: str) -> str:
+    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
 
 def call_qwen(prompt: str) -> str:
     response = requests.post(
@@ -116,9 +216,7 @@ def call_qwen(prompt: str) -> str:
         timeout=300,
     )
     data = response.json()
-    answer = data.get("response", "")
-    answer = re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL)
-    return answer.strip()
+    return strip_think_tags(data.get("response", ""))
 
 
 def call_groq(prompt: str) -> str:
@@ -138,17 +236,86 @@ def call_llm(prompt: str) -> str:
     return call_qwen(prompt)
 
 
+def search_and_answer(question: str) -> str:
+    """Use Groq with web search tool for real-time verified answers."""
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",  # supports web search
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise Swedish tax assistant. "
+                    "Search for current, accurate Swedish tax information. "
+                    "Always cite your sources. "
+                    "Answer in the same language as the question. "
+                    "Only state verified facts — never guess. "
+                    "Always recommend Skatteverket.se for official guidance."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"{question}\n\nSearch for the most current Swedish tax rules from Skatteverket.se",
+            },
+        ],
+        tools=[{"type": "web_search_preview"}],
+        tool_choice="auto",
+        max_tokens=1024,
+    )
+
+    return response.choices[0].message.content or ""
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def ask_question(question: str) -> dict:
+    quick = check_quick_answer(question)
+    verified_context = f"VERIFIED FACT: {quick}\n\n" if quick else ""
+
     payloads = clean_payloads(search_qdrant(question, limit=5))
+    confidence = calculate_confidence(payloads)
 
     if has_good_chunks(payloads):
         print(f"RAG path — {len(payloads)} good chunks found")
-        context = "\n\n".join(
+        context = verified_context + "\n\n".join(
             p.get("document") or p.get("page_content") or "" for p in payloads
         )
-        prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=question)
+        prompt = PROMPT_TEMPLATE.format(context=context, question=question)
+
+        if confidence == "low":
+            # Try web search for a better answer before falling back to weak RAG
+            try:
+                web_answer = strip_think_tags(search_and_answer(question))
+                if web_answer and len(web_answer) > 100:
+                    return {
+                        "answer": web_answer,
+                        "sources": [{
+                            "filename": "Web Search — Live Skatteverket Data",
+                            "page": 0,
+                            "snippet": "Answer sourced from real-time web search",
+                        }],
+                        "confidence": "web",
+                        "hallucination_flagged": False,
+                        "search_used": True,
+                    }
+            except Exception as e:
+                print(f"Web search failed: {e}")
+            # Web search failed or returned nothing — continue with low-confidence prompt hint
+            prompt += """
+    IMPORTANT: The documents do not contain clear information
+    about this topic. Say so clearly at the start of your answer.
+    Do NOT invent tax rates, rules or numbers.
+    Only state what you know for certain from general knowledge.
+    Always recommend the user verify with Skatteverket.
+    """
+        elif confidence == "medium":
+            prompt += """
+    The documents have partial information.
+    Be careful to only state what is clearly in the context.
+    Flag any uncertainty explicitly.
+    """
+
         print("Context length:", len(context))
         print("Prompt being sent:", prompt[:500])
 
@@ -158,6 +325,7 @@ def ask_question(question: str) -> dict:
         if not answer:
             answer = "Kunde inte generera svar. Försök igen."
 
+        search_used = False
         sources = []
         for p in payloads:
             text = p.get("document") or p.get("page_content") or ""
@@ -167,11 +335,34 @@ def ask_question(question: str) -> dict:
                 "filename": p.get("source") or p.get("filename") or "",
             })
 
-        return {"answer": answer, "sources": sources}
+        if not answer or "hittar inte" in answer.lower() or len(answer) < 50:
+            try:
+                web_answer = search_and_answer(question)
+                if web_answer and len(web_answer) > 100:
+                    answer = web_answer
+                    sources.append({
+                        "filename": "Web Search Fallback",
+                        "page": 0,
+                        "snippet": "RAG found no good answer — web search used",
+                    })
+                    search_used = True
+            except Exception:
+                pass
+
+        answer, was_flagged = check_for_hallucination(answer)
+        answer = add_disclaimer(answer, question)
+
+        return {
+            "answer": answer,
+            "confidence": confidence,
+            "hallucination_flagged": was_flagged,
+            "search_used": search_used,
+            "sources": sources,
+        }
 
     else:
         print(f"Fallback path — only {len(payloads)} usable chunks, answering from model knowledge")
-        prompt = FALLBACK_PROMPT_TEMPLATE.format(question=question)
+        prompt = verified_context + FALLBACK_PROMPT_TEMPLATE.format(question=question)
 
         answer = call_llm(prompt)
         print("Fallback answer:", repr(answer[:200]))
@@ -180,8 +371,16 @@ def ask_question(question: str) -> dict:
             answer = "Kunde inte generera svar. Försök igen."
 
         answer += "\n\n*(Svar baserat på allmän kunskap, ej från dina dokument)*"
+        answer, was_flagged = check_for_hallucination(answer)
+        answer = add_disclaimer(answer, question)
 
-        return {"answer": answer, "sources": []}
+        return {
+            "answer": answer,
+            "confidence": confidence,
+            "hallucination_flagged": was_flagged,
+            "search_used": False,
+            "sources": [],
+        }
 
 
 if __name__ == "__main__":

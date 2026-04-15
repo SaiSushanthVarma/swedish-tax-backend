@@ -1,0 +1,31 @@
+FACTS_2026 = {
+    "state_tax_threshold": 643000,
+    "state_tax_rate": 20,
+    "national_average_kommunalskatt": 32.38,
+    "prisbasbelopp": 59200,
+    "grundavdrag_max": 47100,
+    "arbetsgivaravgift": 31.42,
+    "moms_standard": 25,
+    "moms_food": 12,
+    "moms_transport": 6,
+    "rot_deduction": 30,
+    "rut_deduction": 50,
+    "rot_max_per_person": 50000,
+    "rut_max_per_person": 75000,
+    "isk_schablonrate_2026": 1.086,
+    "capital_gains_tax": 30,
+    "pension_contribution": 7,
+    "year": 2026,
+    "source": "Skatteverket + SCB 2026",
+}
+
+QUICK_ANSWERS = {
+    "moms": "Standard VAT (moms) in Sweden is 25%. Food is 12%, transport and books are 6%.",
+    "statlig skatt": "State tax (statlig inkomstskatt) is 20% on taxable income above 643,000 kr (2026).",
+    "arbetsgivaravgift": "Employer contributions (arbetsgivaravgifter) are 31.42% on top of gross salary.",
+    "rot": "ROT deduction covers 30% of labor costs for home repairs, max 50,000 kr per person per year.",
+    "rut": "RUT deduction covers 50% of labor costs for cleaning/household services, max 75,000 kr per year.",
+    "isk": "ISK (Investeringssparkonto) is taxed at 1.086% of account value annually (2026 schablon rate).",
+    "kapitalvinstskatt": "Capital gains tax in Sweden is 30% flat rate.",
+    "pension": "You pay 7% of your salary (up to a ceiling) as pension contribution.",
+}
