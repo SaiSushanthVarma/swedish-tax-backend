@@ -187,30 +187,45 @@ def detect_calculation_request(question: str) -> dict:
     question_lower = question.lower()
 
     monthly_patterns = [
+        # English: "48000 per month", "48000/month", "48000 a month"
         r'(\d[\d\s,]+)\s*(?:kr|sek)?\s*(?:per|a|/)\s*(?:month|månad|mån)',
-        r'(?:monthly|månads(?:lön)?)[:\s]+(\d[\d\s,]+)',
+        # Swedish: "per månad" after digits
+        r'(\d{4,6})\s*per\s*månad',
+        # "48000 kr i månaden" / "48000 sek i månaden"
+        r'(\d[\d\s,]+)\s*(?:kr|sek)\s*i\s*månaden',
         r'(\d[\d\s,]+)\s*kr\s*(?:i månaden|per månaden)',
+        # "månadslon 48000", "månadslon: 48000", "månads... 48000" (handles non-accented lon)
+        r'månads(?:lön|lon)[:\s]+(\d[\d\s,]+)',
+        r'månads\w*\s+(\d[\d\s,]+)',
+        r'månads\w*\s+är\s+(\d[\d\s,]+)',
+        r'(\d{4,6})\s*(?:kr)?\s*(?:i\s*)?månaden?',
+        # English: "monthly salary is 48000", "monthly income of 48000" etc.
+        r'monthly[^\d]{0,25}(\d{4,6})',
+        # English keyword immediately followed by digits: "monthly: 48000"
+        r'(?:monthly)[:\s]+(\d[\d\s,]+)',
+        # "48000 kr monthly" / "48000 monthly"
         r'(\d{4,6})\s*(?:kr\s*)?monthly',
         r'(\d{4,6})\s*(?:kr\s*)?(?:per|a)\s*month',
     ]
 
-    monthly_salary = None
+    salary = None
+
+    # Step 1: Try monthly patterns first
     for pattern in monthly_patterns:
-        match = re.search(pattern, question_lower, re.IGNORECASE)
+        match = re.search(pattern, question_lower)
         if match:
             raw = match.group(1).replace(' ', '').replace(',', '')
             try:
                 val = float(raw)
                 if 5000 <= val <= 200000:
-                    monthly_salary = val * 12
-                    print(f"Monthly salary detected: {val}/month = {monthly_salary}/year")
+                    salary = val * 12  # 48000 * 12 = 576000
+                    print(f"DEBUG: val={val}, monthly_salary={salary}")
+                    print(f"Monthly salary detected: {val}/month = {salary}/year")
                     break
             except Exception:
                 pass
 
-    salary = monthly_salary
-
-    # Yearly salary detection — only runs if monthly detection found nothing
+    # Step 2: Only try yearly if monthly not found
     if salary is None:
         yearly_patterns = [
             r'(\d[\d\s]*[\d])\s*(?:kr|sek|kronor)',
