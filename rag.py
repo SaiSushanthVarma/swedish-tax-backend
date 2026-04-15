@@ -54,15 +54,19 @@ def get_single_embedding(text: str) -> list:
 
 def search_qdrant(question: str, limit: int = 5) -> list[dict]:
     """Return a list of payload dicts from the top matching Qdrant points."""
+    embedding = get_single_embedding(question)
+
     client = QdrantClient(
         url=os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY"),
     )
-    results = client.search(
+
+    results = client.query_points(
         collection_name="swedish_tax",
-        query_vector=get_single_embedding(question),
+        query=embedding,
         limit=limit,
-    )
+    ).points
+
     return [r.payload for r in results]
 
 
