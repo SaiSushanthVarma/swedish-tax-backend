@@ -1,3 +1,4 @@
+import json
 import os
 import re
 
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from qdrant_client import QdrantClient
 
+from swedish_tax_calculator import calculate_tax, detect_calculation_request
 from swedish_tax_facts_2026 import QUICK_ANSWERS
 
 load_dotenv()
@@ -273,9 +275,89 @@ def search_and_answer(question: str) -> str:
     return response.choices[0].message.content or ""
 
 
+# ── Follow-up questions ───────────────────────────────────────────────────────
+
+def generate_followups(question: str, answer: str) -> list:
+    """Generate 3 relevant follow-up questions."""
+    try:
+        followup_prompt = f"""Based on this Swedish tax question and answer, suggest 3 short follow-up questions.
+Return ONLY a valid JSON array of 3 strings. No explanation, no markdown, just the array.
+Example: ["How do I file this?", "What is the deadline?", "Can I deduct more?"]
+
+Question: {question}
+Answer: {answer[:300]}
+
+JSON array:"""
+
+        response = call_groq(followup_prompt)
+        response = response.strip()
+        match = re.search(r'\[.*?\]', response, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except Exception as e:
+        print(f"Followup generation failed: {e}")
+    return []
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def ask_question(question: str, history: list | None = None) -> dict:
+    # ── Tax calculator path ───────────────────────────────────────────────────
+    calc = detect_calculation_request(question)
+
+    if calc["needs_calculation"] and calc["salary"]:
+        result = calculate_tax(calc["salary"], calc["kommun"])
+
+        calc_context = f"""
+Official Swedish tax calculation for {result['kommun']} (2026 rates from SCB):
+
+Gross salary:           {result['salary']:,.0f} kr/year
+Basic deduction:      - {result['grundavdrag']:,.0f} kr (grundavdrag)
+Taxable income:         {result['taxable_income']:,.0f} kr
+Municipal tax {result['kommunal_rate']}%:   - {result['kommunal_skatt']:,.0f} kr
+State tax 20%:        - {result['statlig_skatt']:,.0f} kr
+Job tax credit:       + {result['jobbskatteavdrag']:,.0f} kr (jobbskatteavdrag)
+─────────────────────────────────────
+Total tax:              {result['total_tax']:,.0f} kr/year
+NET salary/year:        {result['net_salary_year']:,.0f} kr
+NET salary/MONTH:       {result['net_salary_month']:,.0f} kr
+Effective tax rate:     {result['effective_rate']}%
+
+Note: State tax applies on taxable income above 643,000 kr.
+Data: SCB official 2026 municipality rates + Skatteverket rules.
+"""
+
+        prompt = f"""You are a Swedish tax assistant.
+The user asked: {question}
+
+Here is the precise tax calculation:
+{calc_context}
+
+Present this clearly with the full breakdown.
+Explain what each component means in plain language.
+Answer in the same language as the question.
+Do NOT make up any numbers — use ONLY the figures above."""
+
+        answer = call_llm(prompt, history)
+        answer = strip_think_tags(answer)
+        answer, was_flagged = check_for_hallucination(answer)
+        followups = generate_followups(question, answer)
+
+        return {
+            "answer": answer,
+            "sources": [{
+                "filename": f"SCB Official Municipality Tax Rates 2026 — {result['kommun']}",
+                "page": 0,
+                "snippet": f"Municipal tax rate: {result['kommunal_rate']}% | Net salary: {result['net_salary_month']:,.0f} kr/month",
+            }],
+            "confidence": "high",
+            "hallucination_flagged": was_flagged,
+            "search_used": False,
+            "followups": followups,
+            "calculation": result,
+        }
+
+    # ── RAG path ──────────────────────────────────────────────────────────────
     quick = check_quick_answer(question)
     verified_context = f"VERIFIED FACT: {quick}\n\n" if quick else ""
 
@@ -304,6 +386,7 @@ def ask_question(question: str, history: list | None = None) -> dict:
                         "confidence": "web",
                         "hallucination_flagged": False,
                         "search_used": True,
+                        "followups": generate_followups(question, web_answer),
                     }
             except Exception as e:
                 print(f"Web search failed: {e}")
@@ -364,6 +447,7 @@ def ask_question(question: str, history: list | None = None) -> dict:
             "hallucination_flagged": was_flagged,
             "search_used": search_used,
             "sources": sources,
+            "followups": generate_followups(question, answer),
         }
 
     else:
@@ -386,6 +470,7 @@ def ask_question(question: str, history: list | None = None) -> dict:
             "hallucination_flagged": was_flagged,
             "search_used": False,
             "sources": [],
+            "followups": generate_followups(question, answer),
         }
 
 
