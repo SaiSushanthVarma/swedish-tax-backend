@@ -233,7 +233,7 @@ def call_groq(prompt: str, history: list | None = None) -> str:
         model=os.getenv("GROQ_MODEL", "qwen/qwen3-32b"),
         messages=messages,
         temperature=0.1,
-        max_tokens=1024,
+        max_tokens=2048,
     )
     return response.choices[0].message.content.strip()
 

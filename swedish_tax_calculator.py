@@ -86,22 +86,30 @@ PRISBASBELOPP_2026 = 59200
 
 
 def calculate_grundavdrag(income: float) -> float:
+    """
+    Grundavdrag 2026 based on prisbasbelopp 59,200 kr.
+    Source: Skatteverket SKV 425 utgåva 32
+    """
+    pbb = 59200  # prisbasbelopp 2026
+
     if income <= 0:
         return 0
-    elif income <= 40000:
-        return income * 0.35
-    elif income <= 135100:
-        return 14000 + (income - 40000) * 0.2
-    elif income <= 269000:
-        return 33000 + (income - 135100) * 0.1
-    elif income <= 320000:
-        return 46410
-    elif income <= 400000:
-        return 46410 - (income - 320000) * 0.1
-    elif income <= 600000:
-        return 38410 - (income - 400000) * 0.05
+    elif income <= 0.99 * pbb:       # <= 58,608
+        return 0.423 * income
+    elif income <= 2.72 * pbb:       # <= 161,024
+        return 0.423 * 0.99 * pbb + 0.20 * (income - 0.99 * pbb)
+    elif income <= 3.11 * pbb:       # <= 184,112
+        return min(0.36 * pbb, 0.423 * 0.99 * pbb + 0.20 * (income - 0.99 * pbb))
+    elif income <= 7.88 * pbb:       # <= 466,496
+        return 0.36 * pbb            # = 21,312
+    elif income <= 10.0 * pbb:       # <= 592,000
+        return 0.36 * pbb + 0.20 * (income - 7.88 * pbb)
+    elif income <= 12.75 * pbb:      # <= 754,800
+        return min(0.77 * pbb, 0.36 * pbb + 0.20 * (income - 7.88 * pbb))
+    elif income <= 13.5 * pbb:       # <= 799,200
+        return 0.77 * pbb - 0.20 * (income - 12.75 * pbb)
     else:
-        return max(16800, 38410 - (income - 400000) * 0.05)
+        return max(0.17 * pbb, 0.77 * pbb - 0.20 * (income - 12.75 * pbb))
 
 
 def calculate_jobbskatteavdrag(income: float, kommunal_rate: float) -> float:
@@ -185,29 +193,52 @@ def detect_calculation_request(question: str) -> dict:
 
     question_lower = question.lower()
 
-    salary_patterns = [
-        r'(\d[\d\s]*[\d])\s*(?:kr|sek|kronor)',
-        r'(\d+)\s*(?:tusen|thousand)',
-        r'salary\s+(?:of\s+)?(\d[\d\s,]*)',
-        r'lön\s+(?:på\s+)?(\d[\d\s]*)',
-        r'tjänar\s+(\d[\d\s]*)',
-        r'earn\s+(\d[\d\s,]*)',
+    # Monthly salary detection — checked first so "45000 kr/month" isn't
+    # misread as a yearly figure by the generic yearly patterns below.
+    monthly_patterns = [
+        r'(\d[\d\s,]+)\s*(?:kr|sek)?\s*(?:per|a|/)\s*(?:month|månad|mån)\b',
+        r'(?:monthly|månads(?:lön)?)[:\s]+(\d[\d\s,]+)',
+        r'(\d[\d\s,]+)\s*(?:kr|sek)\s*(?:i månaden|per månaden|månadsvis)',
+        r'(\d{4,6})\s*(?:kr)?\s*monthly',
     ]
 
     salary = None
-    for pattern in salary_patterns:
-        match = re.search(pattern, question_lower)
+    for pattern in monthly_patterns:
+        match = re.search(pattern, question_lower, re.IGNORECASE)
         if match:
             raw = match.group(1).replace(' ', '').replace(',', '')
             try:
                 val = float(raw)
-                if val < 1000 and 'tusen' in question_lower:
-                    val *= 1000
-                elif val >= 100:
-                    salary = val
-                break
+                if 5000 <= val <= 200000:  # reasonable monthly range in kr
+                    salary = val * 12      # convert to yearly
+                    print(f"Monthly salary detected: {val} kr/month = {salary} kr/year")
+                    break
             except Exception:
                 pass
+
+    # Yearly salary detection — only runs if monthly detection found nothing
+    if salary is None:
+        yearly_patterns = [
+            r'(\d[\d\s]*[\d])\s*(?:kr|sek|kronor)',
+            r'(\d+)\s*(?:tusen|thousand)',
+            r'salary\s+(?:of\s+)?(\d[\d\s,]*)',
+            r'lön\s+(?:på\s+)?(\d[\d\s]*)',
+            r'tjänar\s+(\d[\d\s]*)',
+            r'earn\s+(\d[\d\s,]*)',
+        ]
+        for pattern in yearly_patterns:
+            match = re.search(pattern, question_lower)
+            if match:
+                raw = match.group(1).replace(' ', '').replace(',', '')
+                try:
+                    val = float(raw)
+                    if val < 1000 and 'tusen' in question_lower:
+                        val *= 1000
+                    elif val >= 100:
+                        salary = val
+                    break
+                except Exception:
+                    pass
 
     kommun = None
     # Sort by length descending so longer names match first
