@@ -1,4 +1,5 @@
 import os
+import re
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -11,6 +12,10 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient
 
 from rag import ask_question
+
+
+def strip_think_tags(text: str) -> str:
+    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
 MODEL_NAME = "qwen3.5:27b"
 
@@ -47,12 +52,14 @@ def chat(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="Question must not be empty.")
     result = ask_question(request.question, request.history)
+    clean_answer = strip_think_tags(result["answer"])
     return {
-        "answer": result["answer"],
+        "answer": clean_answer,
         "sources": result["sources"],
         "confidence": result.get("confidence"),
         "search_used": result.get("search_used", False),
         "hallucination_flagged": result.get("hallucination_flagged", False),
+        "followups": result.get("followups", []),
     }
 
 

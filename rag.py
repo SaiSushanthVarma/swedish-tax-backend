@@ -302,8 +302,42 @@ JSON array:"""
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def ask_question(question: str, history: list | None = None) -> dict:
+    # ── Extract profile data embedded in the question string ──────────────────
+    profile_salary = None
+    profile_kommun = None
+
+    salary_match = re.search(r'Annual salary[:\s]+(\d[\d,\.]+)', question, re.IGNORECASE)
+    if salary_match:
+        raw = salary_match.group(1).replace(',', '').replace('.', '')
+        try:
+            profile_salary = float(raw)
+        except Exception:
+            pass
+
+    kommun_match = re.search(r'Municipality[:\s]+([^\n,]+)', question, re.IGNORECASE)
+    if kommun_match:
+        profile_kommun = kommun_match.group(1).strip().lower()
+
     # ── Tax calculator path ───────────────────────────────────────────────────
     calc = detect_calculation_request(question)
+
+    # Fill in missing salary/kommun from profile if the question didn't supply them
+    if not calc["salary"] and profile_salary:
+        calc["salary"] = profile_salary
+        calc["needs_calculation"] = True
+
+    if not calc["kommun"] and profile_kommun:
+        calc["kommun"] = profile_kommun
+
+    # Trigger calculator for "what's my tax" questions when profile has a salary
+    tax_trigger_words = [
+        "what's my tax", "my tax", "min skatt", "vad betalar jag",
+        "hur mycket skatt", "calculate my", "räkna min",
+    ]
+    if any(t in question.lower() for t in tax_trigger_words) and profile_salary:
+        calc["needs_calculation"] = True
+        calc["salary"] = calc["salary"] or profile_salary
+        calc["kommun"] = calc["kommun"] or profile_kommun or "sverige"
 
     if calc["needs_calculation"] and calc["salary"]:
         result = calculate_tax(calc["salary"], calc["kommun"])
