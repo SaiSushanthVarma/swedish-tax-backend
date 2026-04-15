@@ -34,6 +34,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     question: str
+    history: list = []  # list of {"role": "user/assistant", "content": str}
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -45,8 +46,14 @@ def health():
 def chat(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="Question must not be empty.")
-    result = ask_question(request.question)
-    return {"answer": result["answer"], "sources": result["sources"]}
+    result = ask_question(request.question, request.history)
+    return {
+        "answer": result["answer"],
+        "sources": result["sources"],
+        "confidence": result.get("confidence"),
+        "search_used": result.get("search_used", False),
+        "hallucination_flagged": result.get("hallucination_flagged", False),
+    }
 
 
 @app.get("/admin/stats")

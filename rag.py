@@ -219,20 +219,26 @@ def call_qwen(prompt: str) -> str:
     return strip_think_tags(data.get("response", ""))
 
 
-def call_groq(prompt: str) -> str:
+def call_groq(prompt: str, history: list | None = None) -> str:
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    messages = []
+    for msg in (history or [])[-6:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": prompt})
+
     response = client.chat.completions.create(
         model=os.getenv("GROQ_MODEL", "qwen/qwen3-32b"),
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0.1,
         max_tokens=1024,
     )
     return response.choices[0].message.content.strip()
 
 
-def call_llm(prompt: str) -> str:
+def call_llm(prompt: str, history: list | None = None) -> str:
     if os.getenv("USE_GROQ") == "true":
-        return call_groq(prompt)
+        return call_groq(prompt, history)
     return call_qwen(prompt)
 
 
@@ -269,7 +275,7 @@ def search_and_answer(question: str) -> str:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def ask_question(question: str) -> dict:
+def ask_question(question: str, history: list | None = None) -> dict:
     quick = check_quick_answer(question)
     verified_context = f"VERIFIED FACT: {quick}\n\n" if quick else ""
 
@@ -319,7 +325,7 @@ def ask_question(question: str) -> dict:
         print("Context length:", len(context))
         print("Prompt being sent:", prompt[:500])
 
-        answer = call_llm(prompt)
+        answer = call_llm(prompt, history)
         print("Cleaned answer:", repr(answer[:200]))
 
         if not answer:
@@ -364,7 +370,7 @@ def ask_question(question: str) -> dict:
         print(f"Fallback path — only {len(payloads)} usable chunks, answering from model knowledge")
         prompt = verified_context + FALLBACK_PROMPT_TEMPLATE.format(question=question)
 
-        answer = call_llm(prompt)
+        answer = call_llm(prompt, history)
         print("Fallback answer:", repr(answer[:200]))
 
         if not answer:

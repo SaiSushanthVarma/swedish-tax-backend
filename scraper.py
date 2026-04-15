@@ -16,6 +16,20 @@ URLS = [
     "https://www.skatteverket.se/foretag/drivaforetag/enskildnaringsverksamhet.4.5c13cb6b1198121ee8580002518.html",
     "https://www.skatteverket.se/privat/etjansterochblanketter/blanketterbroschyrer/broschyrer/info/425.4.39f16f103821c58f680007809.html",
     "https://www.skatteverket.se/foretag/etjansterochblanketter/blanketterbroschyrer/broschyrer/info/403.4.39f16f103821c58f680007749.html",
+    # Reseavdrag (replaces SKV 500)
+    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/avdrag/resortillochfranarbetet.4.html",
+    # Förmåner (replaces SKV 341)
+    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/formaner.4.html",
+    # Avdrag lexikon — huge resource
+    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/avdrag.4.html",
+    # ROT och RUT
+    "https://www.skatteverket.se/privat/fastigheterochbostad/rotochrutarbete.4.html",
+    # Starta företag
+    "https://www.skatteverket.se/foretag/drivaforetag/startaochregistrera.4.html",
+    # Moms grundläggande
+    "https://www.skatteverket.se/foretag/moms.4.html",
+    # Pension och skatt
+    "https://www.skatteverket.se/privat/pension.4.html",
 ]
 
 OUTPUT_DIR = Path("../docs/web")
