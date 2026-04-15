@@ -9,27 +9,34 @@ URLS = [
     # Already working
     "https://www.skatteverket.se/foretag/drivaforetag/foretagsformer/enskildnaringsverksamhet.4.5c13cb6b1198121ee8580002518.html",
     "https://www.skatteverket.se/foretag/drivaforetag/startaochregistrera/fordigsomvillstartaforetag.4.6e8a1495181dad540842251.html",
-    # New
-    "https://www.skatteverket.se/foretag/drivaforetag/startaochregistrera.4.58d555751259e4d661680006123.html",
-    "https://www.skatteverket.se/foretag/inkomstdeklaration/deklareraenskildnaringsverksamhet.4.133ff59513d6f9ee2ebf00.html",
-    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/deklarera.4.html",
-    "https://www.skatteverket.se/foretag/drivaforetag/enskildnaringsverksamhet.4.5c13cb6b1198121ee8580002518.html",
-    "https://www.skatteverket.se/privat/etjansterochblanketter/blanketterbroschyrer/broschyrer/info/425.4.39f16f103821c58f680007809.html",
-    "https://www.skatteverket.se/foretag/etjansterochblanketter/blanketterbroschyrer/broschyrer/info/403.4.39f16f103821c58f680007749.html",
-    # Reseavdrag (replaces SKV 500)
-    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/avdrag/resortillochfranarbetet.4.html",
-    # Förmåner (replaces SKV 341)
-    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/formaner.4.html",
-    # Avdrag lexikon — huge resource
-    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/avdrag.4.html",
-    # ROT och RUT
-    "https://www.skatteverket.se/privat/fastigheterochbostad/rotochrutarbete.4.html",
-    # Starta företag
-    "https://www.skatteverket.se/foretag/drivaforetag/startaochregistrera.4.html",
+    # Reseavdrag — car travel deductions
+    "https://www.skatteverket.se/privat/skatter/bilochtrafik/avdragforresortillochfranarbetet.4.3810a01c150939e893f25603.html",
+    # Reseavdrag — car specifically
+    "https://www.skatteverket.se/privat/skatter/bilochtrafik/avdragforresortillochfranarbetet/resormedbilmotorcykelellermopedbil.4.5c281c7015abecc2e203f23d.html",
+    # Reseavdrag — public transport
+    "https://www.skatteverket.se/privat/skatter/bilochtrafik/avdragforresortillochfranarbetet/resormedkollektivtrafik.4.515a6be615c637b9aa4122.html",
+    # Reseavdrag — calculate your deduction
+    "https://www.skatteverket.se/privat/skatter/bilochtrafik/avdragforresortillochfranarbetet/beraknadittreseavdrag.4.515a6be615c637b9aa420e.html",
+    # ROT and RUT
+    "https://www.skatteverket.se/privat/fastigheterochbostad/rotochrutarbete.4.2e56d4ba1202f95012080002812.html",
+    # Förmåner (employee benefits)
+    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/formaner.4.233f91f71260075abe8800020817.html",
+    # Deklarera privatperson
+    "https://www.skatteverket.se/privat/deklaration.4.html",
     # Moms grundläggande
-    "https://www.skatteverket.se/foretag/moms.4.html",
+    "https://www.skatteverket.se/foretag/moms.4.18e1b10334ebe8bc80002417.html",
+    # Starta företag
+    "https://www.skatteverket.se/foretag/drivaforetag/startaochregistrera.4.58d555751259e4d661680006123.html",
     # Pension och skatt
-    "https://www.skatteverket.se/privat/pension.4.html",
+    "https://www.skatteverket.se/privat/pension/skattpadinpension.4.22501d9e166a8e8d86800015.html",
+    # Avdrag lexikon
+    "https://www.skatteverket.se/privat/skatter/arbeteochinkomst/avdrag.4.7be5268414bea064694c6ba.html",
+    # F-skatt
+    "https://www.skatteverket.se/foretag/drivaforetag/enskildnaringsverksamhet/skatterochavgifter/fskattaochfa-skatt.4.361dc8c15312eff6fd2d5f.html",
+    # Räntefördelning
+    "https://www.skatteverket.se/foretag/drivaforetag/enskildnaringsverksamhet/deklarera/rantedistribution.4.html",
+    # Arbetsgivaravgifter
+    "https://www.skatteverket.se/foretag/arbetsgivare/arbetsgivaravgifterochskatteavdrag.4.233f91f71260075abe8800022449.html",
 ]
 
 OUTPUT_DIR = Path("../docs/web")
