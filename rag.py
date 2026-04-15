@@ -8,7 +8,7 @@ from groq import Groq
 from qdrant_client import QdrantClient
 
 from swedish_tax_calculator import calculate_tax, detect_calculation_request
-from swedish_tax_facts_2026 import QUICK_ANSWERS
+from swedish_tax_facts_2026 import QUICK_ANSWERS, calculate_reseavdrag
 
 load_dotenv()
 
@@ -85,26 +85,23 @@ def search_qdrant(question: str, limit: int = 5) -> list[dict]:
 def clean_payloads(results: list) -> list:
     cleaned = []
     for r in results:
-        text = r.get("page_content", "") or r.get("text", "")
+        text = (
+            r.get("document") or
+            r.get("page_content") or
+            r.get("text") or
+            ""
+        )
 
-        # Must be long enough
         if len(text.strip()) < 150:
             continue
-
-        # Must be mostly letters (no formula pages)
         letters = sum(c.isalpha() for c in text)
         if letters / len(text) < 0.50:
             continue
-
-        # Must have complete sentences (has periods)
         if text.count('.') < 2:
             continue
-
-        # Must not be mostly numbers (tax tables)
         digits = sum(c.isdigit() for c in text)
         if digits / len(text) > 0.30:
             continue
-
         cleaned.append(r)
 
     return cleaned
@@ -131,8 +128,8 @@ def calculate_confidence(docs: list) -> str:
     # Count how many chunks have good letter ratio
     good_chunks = sum(
         1 for d in docs
-        if sum(c.isalpha() for c in d.get("text", "")) /
-           max(len(d.get("text", "")), 1) > 0.5
+        if (text := d.get("document") or d.get("page_content") or d.get("text") or "")
+        and sum(c.isalpha() for c in text) / max(len(text), 1) > 0.5
     )
 
     if good_chunks >= 3:
@@ -406,6 +403,80 @@ Do NOT make up any numbers — use ONLY the figures above."""
             "calculation": result,
         }
 
+    # ── Reseavdrag calculator path ────────────────────────────────────────────
+    reseavdrag_match = re.search(
+        r'(\d+)\s*(?:km|kilometer|mil).*?(\d+)\s*(?:days|dagar|dag)',
+        question, re.IGNORECASE
+    )
+    if not reseavdrag_match:
+        reseavdrag_match = re.search(
+            r'(\d+)\s*(?:days|dagar).*?(\d+)\s*(?:km|kilometer)',
+            question, re.IGNORECASE
+        )
+
+    if reseavdrag_match and any(w in question.lower() for w in
+            ['travel', 'commute', 'resa', 'pendla', 'reseavdrag', 'km', 'deduct']):
+
+        km_match = re.search(r'(\d+)\s*km', question, re.IGNORECASE)
+        days_match = re.search(r'(\d+)\s*(?:days|dagar)', question, re.IGNORECASE)
+
+        if km_match and days_match:
+            km = float(km_match.group(1))
+            days = int(days_match.group(1))
+
+            result = calculate_reseavdrag(km, days)
+
+            reseavdrag_context = f"""
+RESEAVDRAG CALCULATION 2026 (Skatteverket official rates):
+
+Travel details:
+- One way distance: {result['km_one_way']} km
+- Work days per year: {result['work_days']} days
+- Total km per year: {result['total_km_year']} km
+
+Cost calculation:
+- Rate: {result['rate_per_km']} kr/km (25 kr/mil — Skatteverket 2026)
+- Total commute cost: {result['total_cost']:,.0f} kr/year
+- Threshold (beloppsgräns): {result['threshold']:,.0f} kr
+
+Result:
+- Deductible amount: {result['deductible_amount']:,.0f} kr
+- Estimated tax saving: ~{result['estimated_tax_saving']:,.0f} kr/year
+- Qualifies for deduction: {'YES ✅' if result['qualifies'] else 'NO ❌ (below threshold)'}
+
+Requirements to qualify:
+1. Minimum 5 km one way ✅
+2. Must save 2+ hours/day vs public transport
+3. Costs must exceed {result['threshold']:,.0f} kr/year threshold
+"""
+
+            prompt = f"""You are a Swedish tax assistant.
+{reseavdrag_context}
+
+User question: {question}
+
+Explain the reseavdrag calculation clearly.
+State if they qualify and how much they save.
+Mention the requirements they need to check.
+Answer in the same language as the question."""
+
+            answer = call_llm(prompt, history)
+            answer = strip_think_tags(answer)
+            followups = generate_followups(question, answer)
+
+            return {
+                "answer": answer,
+                "sources": [{
+                    "filename": "Skatteverket Reseavdrag 2026 — Official Rates",
+                    "page": 0,
+                    "snippet": f"Rate: 25 kr/mil | Threshold: {result['threshold']:,.0f} kr | Deductible: {result['deductible_amount']:,.0f} kr",
+                }],
+                "confidence": "high",
+                "hallucination_flagged": False,
+                "search_used": False,
+                "followups": followups,
+            }
+
     # ── RAG path ──────────────────────────────────────────────────────────────
     quick = check_quick_answer(question)
     verified_context = f"VERIFIED FACT: {quick}\n\n" if quick else ""
@@ -416,7 +487,8 @@ Do NOT make up any numbers — use ONLY the figures above."""
     if has_good_chunks(payloads):
         print(f"RAG path — {len(payloads)} good chunks found")
         context = verified_context + "\n\n".join(
-            p.get("document") or p.get("page_content") or "" for p in payloads
+            p.get("document") or p.get("page_content") or p.get("text") or ""
+            for p in payloads
         )
         prompt = PROMPT_TEMPLATE.format(context=context, question=question)
 
@@ -466,7 +538,7 @@ Do NOT make up any numbers — use ONLY the figures above."""
         search_used = False
         sources = []
         for p in payloads:
-            text = p.get("document") or p.get("page_content") or ""
+            text = p.get("document") or p.get("page_content") or p.get("text") or ""
             sources.append({
                 "page": p.get("page", 0),
                 "snippet": text[:200],
