@@ -306,17 +306,27 @@ def ask_question(question: str, history: list | None = None) -> dict:
     profile_salary = None
     profile_kommun = None
 
-    salary_match = re.search(r'Annual salary[:\s]+(\d[\d,\.]+)', question, re.IGNORECASE)
+    salary_match = re.search(
+        r'Annual salary[:\s]+(\d[\d\s,\.]+)\s*kr',
+        question,
+        re.IGNORECASE,
+    )
     if salary_match:
-        raw = salary_match.group(1).replace(',', '').replace('.', '')
+        raw = salary_match.group(1).replace(',', '').replace(' ', '').replace('.', '')
         try:
             profile_salary = float(raw)
+            print(f"Profile salary detected: {profile_salary}")
         except Exception:
             pass
 
-    kommun_match = re.search(r'Municipality[:\s]+([^\n,]+)', question, re.IGNORECASE)
+    kommun_match = re.search(
+        r'Municipality[:\s]+([^\n,\]]+)',
+        question,
+        re.IGNORECASE,
+    )
     if kommun_match:
         profile_kommun = kommun_match.group(1).strip().lower()
+        print(f"Profile kommun detected: {profile_kommun}")
 
     # ── Tax calculator path ───────────────────────────────────────────────────
     calc = detect_calculation_request(question)
@@ -343,22 +353,25 @@ def ask_question(question: str, history: list | None = None) -> dict:
         result = calculate_tax(calc["salary"], calc["kommun"])
 
         calc_context = f"""
-Official Swedish tax calculation for {result['kommun']} (2026 rates from SCB):
+TAX CALCULATION — {result['kommun']} 2026
 
-Gross salary:           {result['salary']:,.0f} kr/year
-Basic deduction:      - {result['grundavdrag']:,.0f} kr (grundavdrag)
-Taxable income:         {result['taxable_income']:,.0f} kr
-Municipal tax {result['kommunal_rate']}%:   - {result['kommunal_skatt']:,.0f} kr
-State tax 20%:        - {result['statlig_skatt']:,.0f} kr
-Job tax credit:       + {result['jobbskatteavdrag']:,.0f} kr (jobbskatteavdrag)
-─────────────────────────────────────
-Total tax:              {result['total_tax']:,.0f} kr/year
-NET salary/year:        {result['net_salary_year']:,.0f} kr
-NET salary/MONTH:       {result['net_salary_month']:,.0f} kr
-Effective tax rate:     {result['effective_rate']}%
+━━━ BOTTOM LINE (most important) ━━━
+💰 NET salary per MONTH:  {result['net_salary_month']:,.0f} kr
+💰 NET salary per YEAR:   {result['net_salary_year']:,.0f} kr
+📊 Effective tax rate:    {result['effective_rate']}%
+📊 Total tax per year:    {result['total_tax']:,.0f} kr
 
-Note: State tax applies on taxable income above 643,000 kr.
-Data: SCB official 2026 municipality rates + Skatteverket rules.
+━━━ FULL BREAKDOWN ━━━
+Gross salary:             {result['salary']:,.0f} kr/year
+Basic deduction:        - {result['grundavdrag']:,.0f} kr (grundavdrag — standard yearly deduction)
+Taxable income:           {result['taxable_income']:,.0f} kr
+Municipal tax {result['kommunal_rate']}%:     - {result['kommunal_skatt']:,.0f} kr/year
+State tax 20%:          - {result['statlig_skatt']:,.0f} kr/year
+Job tax credit:         + {result['jobbskatteavdrag']:,.0f} kr/year (jobbskatteavdrag)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL TAX:                {result['total_tax']:,.0f} kr/year
+
+Data: SCB official 2026 rates + Skatteverket rules
 """
 
         prompt = f"""You are a Swedish tax assistant.
@@ -367,7 +380,9 @@ The user asked: {question}
 Here is the precise tax calculation:
 {calc_context}
 
-Present this clearly with the full breakdown.
+Lead with the net monthly salary as the FIRST thing you say.
+Then explain the breakdown.
+Make it very clear what is yearly vs monthly.
 Explain what each component means in plain language.
 Answer in the same language as the question.
 Do NOT make up any numbers — use ONLY the figures above."""
